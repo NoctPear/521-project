@@ -221,3 +221,181 @@ for subdir in data_dir.iterdir():
                 print(f"Processed {image_count} original images...")
 
 print(f"Saved {augmentation_count} augmented images from {image_count} original images to {save_dir}")
+
+# Load the augmented images and split into train/val/test datasets
+print("Loading augmented data and splitting into train/val/test sets...")
+
+# Get list of all image groups from the saved mapping
+group_ids = list(image_groups.keys())
+print(f"Found {len(group_ids)} original image groups")
+
+# Use fixed seed for reproducibility
+np.random.seed(42)
+# Shuffle the group IDs
+np.random.shuffle(group_ids)
+
+# Split with ratio 6:1:3
+train_ratio, val_ratio, test_ratio = 0.6, 0.1, 0.3
+train_size = int(len(group_ids) * train_ratio)
+val_size = int(len(group_ids) * val_ratio)
+
+train_groups = group_ids[:train_size]
+val_groups = group_ids[train_size:train_size + val_size]
+test_groups = group_ids[train_size + val_size:]
+
+print(f"Training groups: {len(train_groups)}")
+print(f"Validation groups: {len(val_groups)}")
+print(f"Testing groups: {len(test_groups)}")
+
+# Function to load images from a list of group IDs
+def load_images_by_groups(group_ids, class_names):
+    images = []
+    labels = []
+    class_to_index = {name: i for i, name in enumerate(class_names)}
+    
+    for group_id in group_ids:
+        class_name = image_groups[group_id]
+        class_index = class_to_index[class_name]
+        
+        # Load all 5 augmentations for this group
+        for aug_idx in range(5):
+            img_path = save_dir / class_name / f"{group_id}_aug_{aug_idx}.jpg"
+            if img_path.exists():
+                # Load and preprocess image
+                img = tf.keras.preprocessing.image.load_img(img_path, target_size=(img_height, img_width))
+                img_array = tf.keras.preprocessing.image.img_to_array(img)
+                
+                images.append(img_array)
+                labels.append(class_index)
+    
+    return np.array(images), np.array(labels)
+
+# Load train, validation and test images
+X_train, y_train = load_images_by_groups(train_groups, class_names)
+X_val, y_val = load_images_by_groups(val_groups, class_names)
+X_test, y_test = load_images_by_groups(test_groups, class_names)
+
+# Normalize pixel values to [0,1]
+X_train = X_train / 255.0
+X_val = X_val / 255.0
+X_test = X_test / 255.0
+
+print(f"X_train shape: {X_train.shape}")
+print(f"X_val shape: {X_val.shape}")
+print(f"X_test shape: {X_test.shape}")
+
+# Count samples per class in each split
+def count_per_class(labels, class_count):
+    counts = np.zeros(class_count, dtype=int)
+    for label in labels:
+        counts[label] += 1
+    return counts
+
+train_counts = count_per_class(y_train, len(class_names))
+val_counts = count_per_class(y_val, len(class_names))
+test_counts = count_per_class(y_test, len(class_names))
+
+print("\nClass distribution:")
+for i, class_name in enumerate(class_names):
+    print(f"{class_name}: {train_counts[i]} train, {val_counts[i]} val, {test_counts[i]} test")
+
+# Create TensorFlow datasets
+train_ds = tf.data.Dataset.from_tensor_slices((X_train, y_train))
+val_ds = tf.data.Dataset.from_tensor_slices((X_val, y_val))
+test_ds = tf.data.Dataset.from_tensor_slices((X_test, y_test))
+
+# Batch and optimize dataset performance
+AUTOTUNE = tf.data.AUTOTUNE
+
+train_ds = train_ds.batch(batch_size).cache().shuffle(1000).prefetch(buffer_size=AUTOTUNE)
+val_ds = val_ds.batch(batch_size).cache().prefetch(buffer_size=AUTOTUNE)
+test_ds = test_ds.batch(batch_size).cache().prefetch(buffer_size=AUTOTUNE)
+
+# Print dataset sizes
+print(f"\nNumber of training batches: {tf.data.experimental.cardinality(train_ds)}")
+print(f"Number of validation batches: {tf.data.experimental.cardinality(val_ds)}")
+print(f"Number of test batches: {tf.data.experimental.cardinality(test_ds)}")
+
+# Visualize one batch of training data
+plt.figure(figsize=(10, 10))
+for images, labels in train_ds.take(1):
+    for i in range(min(9, images.shape[0])):
+        ax = plt.subplot(3, 3, i + 1)
+        plt.imshow(images[i])
+        plt.title(class_names[labels[i].numpy()])
+        plt.axis("off")
+plt.tight_layout()
+plt.suptitle("Sample Training Images", y=0.95)
+plt.show()
+
+# Save train, validation, and test sets to separate directories
+print("Saving train, validation, and test sets to separate directories...")
+
+# Define the directories for the split datasets
+split_dir = pathlib.Path(r"C:\grz\VSCode\521\split_datasets")
+train_dir = split_dir / "train"
+val_dir = split_dir / "val"
+test_dir = split_dir / "test"
+
+# Create the directories
+split_dir.mkdir(exist_ok=True)
+train_dir.mkdir(exist_ok=True)
+val_dir.mkdir(exist_ok=True)
+test_dir.mkdir(exist_ok=True)
+
+# Create class subdirectories in each split directory
+for class_name in class_names:
+    (train_dir / class_name).mkdir(exist_ok=True)
+    (val_dir / class_name).mkdir(exist_ok=True)
+    (test_dir / class_name).mkdir(exist_ok=True)
+
+# Save training images
+print("Saving training images...")
+for group_id in train_groups:
+    class_name = image_groups[group_id]
+    for aug_idx in range(5):
+        src_path = save_dir / class_name / f"{group_id}_aug_{aug_idx}.jpg"
+        if src_path.exists():
+            dst_path = train_dir / class_name / f"{group_id}_aug_{aug_idx}.jpg"
+            shutil.copy(src_path, dst_path)
+
+# Save validation images
+print("Saving validation images...")
+for group_id in val_groups:
+    class_name = image_groups[group_id]
+    for aug_idx in range(5):
+        src_path = save_dir / class_name / f"{group_id}_aug_{aug_idx}.jpg"
+        if src_path.exists():
+            dst_path = val_dir / class_name / f"{group_id}_aug_{aug_idx}.jpg"
+            shutil.copy(src_path, dst_path)
+
+# Save test images
+print("Saving test images...")
+for group_id in test_groups:
+    class_name = image_groups[group_id]
+    for aug_idx in range(5):
+        src_path = save_dir / class_name / f"{group_id}_aug_{aug_idx}.jpg"
+        if src_path.exists():
+            dst_path = test_dir / class_name / f"{group_id}_aug_{aug_idx}.jpg"
+            shutil.copy(src_path, dst_path)
+
+# Count how many images were saved for each set
+train_count = sum(len(list((train_dir / class_name).glob("*.jpg"))) for class_name in class_names)
+val_count = sum(len(list((val_dir / class_name).glob("*.jpg"))) for class_name in class_names)
+test_count = sum(len(list((test_dir / class_name).glob("*.jpg"))) for class_name in class_names)
+
+print(f"Saved {train_count} training images, {val_count} validation images, and {test_count} test images")
+print(f"Train directory: {train_dir}")
+print(f"Validation directory: {val_dir}")
+print(f"Test directory: {test_dir}")
+
+# Save a metadata file with information about the split
+with open(split_dir / "split_info.txt", "w") as f:
+    f.write(f"Dataset split info (ratio 6:1:3)\n")
+    f.write(f"Date created: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+    f.write(f"Train groups: {len(train_groups)} ({train_count} images)\n")
+    f.write(f"Validation groups: {len(val_groups)} ({val_count} images)\n")
+    f.write(f"Test groups: {len(test_groups)} ({test_count} images)\n\n")
+    f.write("Class distribution:\n")
+    for i, class_name in enumerate(class_names):
+        f.write(f"{class_name}: {train_counts[i]} train, {val_counts[i]} val, {test_counts[i]} test\n")
