@@ -1,3 +1,9 @@
+# 1. Standardized all images to 224×224 JPG format.
+# 2. Implemented 5 standard augmentation techniques (original, horizontal flip, 90° rotation, vertical flip, zoom) for all images.
+# 3. Created a fixed train/val/test split (60:10:30) while ensuring all augmented versions of the same image stay in the same split.
+# 4. Saved the organized dataset to three separate directories for training, validation, and testing.
+# The code first augments all images and then splits the dataset, but uses "image_groups" to ensure that all augmented versions of the same original image are assigned to the same dataset.
+
 import numpy as np
 import os
 import PIL
