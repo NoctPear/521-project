@@ -99,59 +99,13 @@ for i, sample_path in enumerate(sample_paths):
 plt.tight_layout()
 plt.show()
 
-# Create TensorFlow datasets from directory
-train_ds = tf.keras.utils.image_dataset_from_directory(
-    data_dir,
-    validation_split=0.2,
-    subset="training",
-    seed=123,
-    image_size=(img_height, img_width),
-    batch_size=batch_size
-)
-
-val_ds = tf.keras.utils.image_dataset_from_directory(
-    data_dir,
-    validation_split=0.2,
-    subset="validation",
-    seed=123,
-    image_size=(img_height, img_width),
-    batch_size=batch_size
-)
-
-# Get class names from dataset
-class_names = train_ds.class_names
+# Get class names directly from data directory
+class_names = [subdir.name for subdir in data_dir.iterdir() if subdir.is_dir()]
 class_names = ['Dried_Aging' if name == 'Dried or Aging' else 'Rotten_Spoiled' 
                if name == 'Rotten or Spoiled' else name for name in class_names]
 print(f"Class names: {class_names}")
 
-# Create pixel value normalization layer (scale to 0-1)
-normalization_layer = tf.keras.layers.Rescaling(1./255)
-
-# Apply normalization to datasets
-train_ds = train_ds.map(lambda x, y: (normalization_layer(x), y))
-val_ds = val_ds.map(lambda x, y: (normalization_layer(x), y))
-
-# Check normalization result
-image_batch, labels_batch = next(iter(train_ds))
-first_image = image_batch[0]
-print(f"Normalized pixel range: min={np.min(first_image):.4f}, max={np.max(first_image):.4f}")
-
-# Optimize dataset performance
-AUTOTUNE = tf.data.AUTOTUNE
-train_ds = train_ds.cache().shuffle(1000).prefetch(buffer_size=AUTOTUNE)
-val_ds = val_ds.cache().prefetch(buffer_size=AUTOTUNE)
-
-# Create test dataset from validation set
-val_batches = tf.data.experimental.cardinality(val_ds)
-test_ds = val_ds.take(val_batches // 2)
-val_ds = val_ds.skip(val_batches // 2)
-
-# Print dataset sizes
-print(f"Number of training batches: {tf.data.experimental.cardinality(train_ds)}")
-print(f"Number of validation batches: {tf.data.experimental.cardinality(val_ds)}")
-print(f"Number of test batches: {tf.data.experimental.cardinality(test_ds)}")
-
-# Create standardized data augmentation based on the requirements
+# Data Augmentation
 def generate_standard_augmentations(image):
     """Generate standard augmentations: original, horizontal flip, rotation, vertical flip, zoom"""
     augmentations = []
@@ -187,63 +141,83 @@ def generate_standard_augmentations(image):
 
 # Visualize standard augmentations for a sample image
 plt.figure(figsize=(15, 10))
-for images, labels in train_ds.take(1):
-    sample_img = images[0].numpy()
-    augmentations = generate_standard_augmentations(sample_img)
-    
-    for i, aug in enumerate(augmentations):
-        ax = plt.subplot(2, 3, i + 1)
-        plt.imshow(aug)
-        if i == 0:
-            plt.title("(a) Original")
-        elif i == 1:
-            plt.title("(b) Horizontal Flip")
-        elif i == 2:
-            plt.title("(c) Rotation (90°)")
-        elif i == 3:
-            plt.title("(d) Vertical Flip")
-        else:
-            plt.title("(e) Zoom")
-        plt.axis("off")
+# Get a sample image directly from the data directory
+sample_path = next(data_dir.glob('*/*.jpg'))
+sample_img = np.array(PIL.Image.open(sample_path).resize((img_width, img_height))) / 255.0
+augmentations = generate_standard_augmentations(sample_img)
+
+for i, aug in enumerate(augmentations):
+    ax = plt.subplot(2, 3, i + 1)
+    plt.imshow(aug)
+    if i == 0:
+        plt.title("(a) Original")
+    elif i == 1:
+        plt.title("(b) Horizontal Flip")
+    elif i == 2:
+        plt.title("(c) Rotation (90°)")
+    elif i == 3:
+        plt.title("(d) Vertical Flip")
+    else:
+        plt.title("(e) Zoom")
+    plt.axis("off")
 plt.tight_layout()
 plt.suptitle("Standard Data Augmentation Techniques", y=0.95)
 plt.show()
 
-# Save standard augmentations
-print("Saving standard augmentations...")
-save_dir = pathlib.Path(r"C:\grz\VSCode\521\standard_augmentations")
+# Save standard augmentations for ALL images
+print("Saving standard augmentations for ALL images...")
+save_dir = pathlib.Path(r"C:\grz\VSCode\521\all_augmented_data")
 save_dir.mkdir(exist_ok=True)
 
 # Create subdirectories for each class
 for class_name in class_names:
     (save_dir / class_name).mkdir(exist_ok=True)
 
-# Save standard augmentations for training images
+# Save standard augmentations for ALL images
 image_count = 0
 augmentation_count = 0
+image_groups = {}  # Track original images and their augmentations
 
-for images, labels in train_ds:
-    for i in range(len(images)):
-        img = images[i].numpy()
-        class_name = class_names[labels[i].numpy()]
-        
-        # Generate standard augmentations
-        augmentations = generate_standard_augmentations(img)
-        
-        # Save all augmentations
-        for j, aug in enumerate(augmentations):
-            # Convert TensorFlow tensor to NumPy array if needed
-            if isinstance(aug, tf.Tensor):
-                aug_array = aug.numpy()
-            else:
-                aug_array = aug
+# Process each class directory
+for subdir in data_dir.iterdir():
+    if subdir.is_dir():
+        # Get standardized class name
+        if subdir.name == 'Dried or Aging':
+            class_name = 'Dried_Aging'
+        elif subdir.name == 'Rotten or Spoiled':
+            class_name = 'Rotten_Spoiled'
+        else:
+            class_name = subdir.name
             
-            # Scale to uint8 range
-            aug_array = (aug_array * 255).astype(np.uint8)
-            aug_img = PIL.Image.fromarray(aug_array)
-            aug_img.save(save_dir / class_name / f"img_{image_count:04d}_aug_{j}.jpg")
-            augmentation_count += 1
-        
-        image_count += 1
+        # Process each image in this class
+        for img_path in subdir.glob('*.jpg'):
+            # Load and preprocess the image
+            img = PIL.Image.open(img_path).resize((img_width, img_height))
+            img_array = np.array(img) / 255.0  # Normalize to 0-1
+            
+            # Generate standard augmentations
+            augmentations = generate_standard_augmentations(img_array)
+            
+            # Create a group ID for tracking related augmentations
+            group_id = f"img_{image_count:04d}"
+            image_groups[group_id] = class_name
+            
+            # Save all augmentations
+            for j, aug in enumerate(augmentations):
+                # Convert TensorFlow tensor to NumPy array if needed
+                if isinstance(aug, tf.Tensor):
+                    aug_array = aug.numpy()
+                else:
+                    aug_array = aug
+                
+                # Scale to uint8 range
+                aug_array = (aug_array * 255).astype(np.uint8)
+                aug_img = PIL.Image.fromarray(aug_array)
+                aug_img.save(save_dir / class_name / f"{group_id}_aug_{j}.jpg")
+                augmentation_count += 1
+            
+            image_count += 1
+            if image_count % 20 == 0:
+                print(f"Processed {image_count} original images...")
 
 print(f"Saved {augmentation_count} augmented images from {image_count} original images to {save_dir}")
