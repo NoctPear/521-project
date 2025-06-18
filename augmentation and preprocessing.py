@@ -407,3 +407,72 @@ with open(split_dir / "split_info.txt", "w") as f:
     f.write("Class distribution:\n")
     for i, class_name in enumerate(class_names):
         f.write(f"{class_name}: {train_counts[i]} train, {val_counts[i]} val, {test_counts[i]} test\n")
+
+# Define path for binary classification dataset
+binary_split_dir = pathlib.Path(r"C:\grz\VSCode\521\binary_split_dataset")
+
+# Define binary class mapping
+binary_mapping = {
+    'Fresh': 'good',
+    'Wilted': 'good',
+    'Dried_Aging': 'defect',
+    'Rotten_Spoiled': 'defect'
+}
+
+print("Reorganizing dataset into binary classification (defect/non-defect)...")
+
+# Create directory structure
+for split in ['train', 'val', 'test']:
+    for binary_class in ['good', 'defect']:
+        os.makedirs(binary_split_dir / split / binary_class, exist_ok=True)
+
+# Process each split
+for split in ['train', 'val', 'test']:
+    source_split_dir = split_dir / split
+    
+    # Process each original class
+    for orig_class in class_names:
+        orig_class_dir = source_split_dir / orig_class
+        
+        # Skip if directory doesn't exist
+        if not orig_class_dir.exists():
+            continue
+        
+        # Get the binary class for this original class
+        binary_class = binary_mapping[orig_class]
+        target_class_dir = binary_split_dir / split / binary_class
+        
+        # Copy all images with prefix to avoid name conflicts
+        img_count = 0
+        for img_path in orig_class_dir.glob('*.jpg'):
+            target_path = target_class_dir / f"{orig_class}_{img_path.name}"
+            shutil.copy(img_path, target_path)
+            img_count += 1
+            
+        print(f"Copied {img_count} images from {split}/{orig_class} to {split}/{binary_class}")
+
+# Count images in the reorganized binary dataset
+good_train = len(list((binary_split_dir / 'train' / 'good').glob('*.jpg')))
+defect_train = len(list((binary_split_dir / 'train' / 'defect').glob('*.jpg')))
+good_val = len(list((binary_split_dir / 'val' / 'good').glob('*.jpg')))
+defect_val = len(list((binary_split_dir / 'val' / 'defect').glob('*.jpg')))
+good_test = len(list((binary_split_dir / 'test' / 'good').glob('*.jpg')))
+defect_test = len(list((binary_split_dir / 'test' / 'defect').glob('*.jpg')))
+
+print("\nBinary Classification Dataset Summary:")
+print(f"Training set: {good_train + defect_train} images ({good_train} good, {defect_train} defect)")
+print(f"Validation set: {good_val + defect_val} images ({good_val} good, {defect_val} defect)")
+print(f"Test set: {good_test + defect_test} images ({good_test} good, {defect_test} defect)")
+print(f"Total: {good_train + defect_train + good_val + defect_val + good_test + defect_test} images")
+print(f"Binary dataset directory: {binary_split_dir}")
+
+# Save metadata about the binary split
+with open(binary_split_dir / "binary_split_info.txt", "w") as f:
+    f.write(f"Binary Dataset split info\n")
+    f.write(f"Date created: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+    f.write(f"Class mapping:\n")
+    f.write(f"  - good (non-defect): Fresh, Wilted\n")
+    f.write(f"  - defect: Dried_Aging, Rotten_Spoiled\n\n")
+    f.write(f"Training set: {good_train + defect_train} images ({good_train} good, {defect_train} defect)\n")
+    f.write(f"Validation set: {good_val + defect_val} images ({good_val} good, {defect_val} defect)\n")
+    f.write(f"Test set: {good_test + defect_test} images ({good_test} good, {defect_test} defect)\n")
